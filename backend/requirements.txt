@@ -1,0 +1,8 @@
+# Pinned to what's actually tested (see DECISIONS.md — unpinned versions
+# had no cp314 wheel when this started; these do). If installing on a very
+# new Python breaks a wheel again, unpin and let pip resolve, then re-pin.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+pydantic==2.13.5
+pyjwt==2.13.0

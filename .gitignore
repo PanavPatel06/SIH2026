@@ -1,0 +1,18 @@
+# backend
+backend/.venv/
+backend/vaari.db
+backend/__pycache__/
+backend/app/__pycache__/
+**/__pycache__/
+*.pyc
+
+# frontend
+node_modules/
+dist/
+
+# secrets — never commit a real one; .env.example in each project is the template
+.env
+.env.local
+
+# misc
+.DS_Store

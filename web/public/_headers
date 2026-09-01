@@ -1,0 +1,8 @@
+# Read by Netlify/Cloudflare Pages on static deploy (README §15's zero-cost
+# hosting options) — ignored elsewhere, harmless to ship either way.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), geolocation=()
+  Content-Security-Policy: default-src 'self'; connect-src 'self' https:; img-src 'self' data: https://raw.githubusercontent.com https://unpkg.com https://*.tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; script-src 'self'

@@ -100,7 +100,7 @@ Each piece **needs** the others. A feature list can be copied in a weekend. A me
 |---|---|---|
 | Farmer registration & slot booking | **Capacity-aware Slot Engine** | Slots derived from real constraints — gunny bags, weighbridges, labour, evacuation trucks — not a fixed number. Overbooking is impossible by construction. |
 | Real-time queue management | **Virtual Queue + Live ETA** | Position is held *while you wait at home*. Geofence activates your token within 10 km. Arriving early gains you nothing — and the app says so. |
-| SMS / app notifications | **Notification Ladder** | Push → SMS → IVR call → FPO kiosk. Material ETA changes reach a 2G feature phone in a village with no data. |
+| SMS / app notifications | **Notification Ladder** | Push → WhatsApp → email → SMS → IVR. Free channels carry the pilot; the SMS port is built and ready for the state's DLT gateway. |
 | Track procurement & payment status | **Payment Pipeline Tracker** | Five explicit stages, each timestamped, each with an SLA. Breach auto-escalates to the district officer. |
 | Reduce congestion & waiting time | **Trip-Saver Advisor (on-device AI)** | Predicts rejection risk *before the trolley is loaded*, and recommends the slot with the lowest total cost to the farmer. Runs with **zero network**. |
 | *(beyond the PS)* | **Cross-centre load balancing** | Centre A backed up 3 days, Centre B idle 9 km away → offer the swap. This is what actually *reduces* congestion district-wide. |
@@ -116,6 +116,7 @@ flowchart TB
         direction LR
         APP["Farmer App<br/>Android · offline-first"]
         SMS["SMS / IVR<br/>feature phones"]
+        MAIL["Email / WhatsApp<br/>officers + farmers"]
         GATE["Gate Operator App<br/>offline QR scan"]
         DASH["Officer Dashboard<br/>web"]
     end
@@ -124,7 +125,7 @@ flowchart TB
         direction LR
         GW["API Gateway<br/>auth · rate limit"]
         SYNC["Delta Sync Service<br/>tiny payloads for 2G"]
-        SMSGW["SMS / IVR Gateway<br/>DLT-registered"]
+        SMSGW["Notification Gateway<br/>push · WhatsApp · email · SMS"]
     end
 
     subgraph CORE["⚙️ CORE SERVICES"]
@@ -157,6 +158,7 @@ flowchart TB
     GATE --> GW
     DASH --> GW
     SMS --> SMSGW
+    MAIL --> SMSGW
     APP <-.delta.-> SYNC
 
     GW --> ID & SLOT & QUEUE & PAY
@@ -214,7 +216,7 @@ sequenceDiagram
     Note over Q: Thursday — centre falls 90 min behind
     Q->>N: ETA shift +90 min (material)
     N-->>A: 🔔 push: "New ETA 12:30. Leave by 11:45."
-    N-->>F: 📩 SMS fallback if push not ACKed in 10 min
+    N-->>F: 📩 WhatsApp / email fallback if push not ACKed<br/>(SMS port ready for state DLT gateway)
     Note over F: Still at home. Re-plans. Zero cost.
 
     F->>F: 🚜 Leaves at 11:45
@@ -316,29 +318,46 @@ This is a **hard architectural constraint**, not a nice-to-have. Everything belo
 ```mermaid
 flowchart TD
     CH["📣 ETA / schedule change"] --> MAT{"Material?<br/>shift > 45 min"}
-    MAT -->|no| LOG["Log only.<br/>Sync on next open."]
-    MAT -->|yes| P["① Push via FCM<br/>needs data"]
+    MAT -->|no| LOG["Log only.<br/>Sync on next app open."]
+    MAT -->|yes| P
 
-    P --> ACK{"ACKed<br/>in 10 min?"}
-    ACK -->|yes| DONE["✅ Delivered"]
-    ACK -->|no| S["② SMS<br/>needs only 2G signal"]
+    subgraph FREE["💰 ₹0 TIERS — but every one of them needs data"]
+        direction TB
+        P["① FCM push<br/>free, unlimited"] -->|"no ACK in 10 min"| W
+        W["② WhatsApp Cloud API<br/>free tier · best rural reach"] -->|"not delivered"| E
+        E["③ Email<br/>free · also the officer channel"]
+    end
 
-    S --> ACK2{"ACKed or<br/>read receipt?"}
-    ACK2 -->|yes| DONE
-    ACK2 -->|no| I["③ Outbound IVR call<br/>local language, no literacy needed"]
+    E -->|"not opened in 20 min"| S
 
-    I --> ACK3{"Answered?"}
-    ACK3 -->|yes| DONE
-    ACK3 -->|no| K["④ FPO kiosk / village<br/>display board · gram panchayat"]
+    subgraph NODATA["📡 NO-DATA TIER — the one that reaches a feature phone"]
+        direction TB
+        S["④ SMS adapter<br/>interface built · mocked in pilot<br/>state plugs in its DLT gateway"] -->|"unavailable"| I
+        I["⑤ IVR / FPO kiosk<br/>Phase 3"]
+    end
 
-    style P fill:#e3f2fd,stroke:#1565c0
-    style S fill:#e8f5e9,stroke:#2e7d32
-    style I fill:#fff3e0,stroke:#ef6c00
-    style K fill:#fce4ec,stroke:#c2185b
-    style DONE fill:#e8f5e9,stroke:#2e7d32
+    style FREE fill:#e8f5e9,stroke:#2e7d32
+    style NODATA fill:#fff3e0,stroke:#ef6c00
 ```
 
-**Why the `Material?` gate exists:** SMS costs money at national scale. Gating on a 45-minute threshold cuts volume by an estimated order of magnitude while never hiding a change the farmer would act on. *(Threshold is configurable per state and should be tuned on pilot data.)*
+### The channels, honestly
+
+| Tier | Channel | Cost | Needs data? | Reaches | Role |
+|---|---|---|---|---|---|
+| ① | **FCM push** | **Free, unlimited** | ✅ yes | Smartphone users with our app | Primary |
+| ② | **WhatsApp Cloud API** | Free tier *(verify current terms)* | ✅ yes | Very wide rural India penetration | **The realistic farmer channel** |
+| ③ | **Email** | Free *(Brevo / Resend / SMTP)* | ✅ yes | Officers always; farmers sometimes | **Officer + audit channel**, farmer fallback |
+| ④ | **SMS** | Needs DLT + per-message | ❌ **no — 2G signal only** | **Everyone, including feature phones** | The tier that makes the ladder complete |
+| ⑤ | **IVR / FPO kiosk** | Voice minutes | ❌ no | Non-readers, the fully disconnected | Phase 3 |
+
+> ⚠️ **Be honest about this trade-off — a judge will find it otherwise.**
+> Tiers ①–③ are free, but **all three require a data connection.** SMS was special precisely because it needs *none*. Dropping it to save money would delete the ladder's whole reason for existing.
+>
+> **So we don't drop it — we build the interface and mock the sender.** Every channel implements one `NotificationChannel` port: `send(recipient, message) → DeliveryStatus`. The pilot ships ①–③ live and ④ as a mock that logs and shows in the dashboard. **The state plugs its existing DLT gateway into the same port with one adapter class and zero changes elsewhere.**
+>
+> Say this out loud in the pitch: *"We built the no-data tier as an interface, not a stub, because we didn't have DLT access. The state does."* That converts a budget constraint into evidence of good design.
+
+**Why the `Material?` gate exists:** notifications cost money at national scale — SMS especially. Gating on a 45-minute threshold cuts volume by an estimated order of magnitude while never hiding a change the farmer would act on. *(Threshold is configurable per state and should be tuned on pilot data.)*
 
 ### What the app does with zero network
 
@@ -583,18 +602,176 @@ Deliberately boring. Boring survives a demo day and a government audit.
 | **Farmer app** | Kotlin + Jetpack Compose, **Room**, **WorkManager** | Room = offline truth; WorkManager = retry/backoff for free. Target **API 24+** — old phones are the actual user base. |
 | **On-device ML** | **ONNX Runtime Mobile** (quantised) | ~2 MB, runs LightGBM exports. TFLite is the fallback if size becomes an issue. |
 | **Backend** | **Python + FastAPI** | ML lives in the request path; keeping one language removes a whole class of glue. |
-| **Transactional DB** | **PostgreSQL** | Slot allocation needs real transactions. Row-level locking prevents double-booking. |
-| **Live queue state** | **Redis** | ETAs recompute constantly; durable truth stays in Postgres. |
-| **Notifications** | FCM + **DLT-registered** Indian SMS gateway + IVR provider | DLT registration is mandatory for commercial SMS in India — **start this paperwork early.** |
+| **Transactional DB** | **PostgreSQL** | Slot allocation needs real transactions. Row-level locking prevents double-booking. Free via Supabase or Neon — see §15. |
+| **Live queue state** | **Redis** *(Phase 2+)* | ETAs recompute constantly; durable truth stays in Postgres. **Cut from Phase 1** — Postgres handles pilot scale. See §15. |
+| **Notifications** | FCM + WhatsApp Cloud API + email, behind one `NotificationChannel` port | All three are free. SMS/IVR implement the same port — **the state supplies the DLT gateway. See §15.** |
 | **ML training** | LightGBM / scikit-learn → ONNX export | Tabular data. Gradient-boosted trees beat deep learning here and are far easier to explain to a judge. |
 | **Officer dashboard** | React + Leaflet | Map-first — the officer thinks in geography. |
-| **Deployment** | Docker + **NIC / MeghRaj** cloud | Government deployments favour NIC. Docker keeps it portable. |
+| **Deployment** | Docker + **NIC / MeghRaj** cloud | Government deployments favour NIC. Docker keeps it portable — and lets the pilot run on a ₹0 tier first. |
 
 > **No blockchain. No LLM. No drones.** Every unrelated buzzword weakens the pitch — a judge who can say *"nice, but why?"* has stopped listening.
 
 ---
 
-## 15. Scaling
+## 15. Building this for ₹0
+
+**The good news: this architecture is already cheap by construction.**
+
+| Design choice | Why it saves money |
+|---|---|
+| **Offline-first** | Fewer requests per farmer per day → stays inside free request quotas |
+| **Delta sync (1–5 KB)** | Free tiers meter bandwidth. Tiny payloads barely register. |
+| **On-device ML** | **No inference server at all.** Inference is the expensive part of ML hosting — we simply don't host it. |
+| **Seasonal load** | ~245 days a year at near-zero traffic. Free tiers are sized for exactly this shape. |
+
+We didn't design it this way to be cheap — we designed it for bad rural networks. Cheap is a side effect. **Say that in the pitch;** "our architecture costs nothing to run off-season" is a real argument to a ministry, not just a student's constraint.
+
+### The ₹0 stack
+
+> ⚠️ **Free tiers change constantly. Verify current terms before you commit** — this table reflects a snapshot, not a guarantee.
+
+| Layer | Free choice | Limit | What breaks first |
+|---|---|---|---|
+| **Backend API** | **Oracle Cloud Always Free** ARM VM (4 cores / 24 GB, no time limit) | Always free, no expiry | ARM capacity is often unavailable at signup — retry, or fall back to Render |
+| ↳ *fallback* | Render / Hugging Face Spaces free web service | Sleeps after ~15 min idle | **Cold start — see the demo trap below** |
+| **Database** | **Supabase** free tier — Postgres + PostGIS + storage + auth | Pauses after ~1 week idle, restores on request | Row/storage caps; fine at pilot scale |
+| ↳ *alternative* | **Neon** serverless Postgres | Generous free compute hours | Cold starts on first query |
+| **Live queue state** | **Cut Redis entirely for Phase 1** | — | Nothing. See below. |
+| **Push notifications** | **Firebase Cloud Messaging** | **Free, unlimited, forever** | Nothing. FCM has no paid tier for messaging. |
+| **Email** | **Brevo** ~300/day, or **Resend** ~3,000/mo, or Gmail SMTP | Daily send caps | Caps are far above pilot volume |
+| **WhatsApp** | **WhatsApp Cloud API** free service tier | Meta changes terms often | Verify before depending on it |
+| **SMS** | **Mocked port** — state supplies the DLT gateway | n/a in pilot | Nothing. See below. |
+| **Telegram** *(backup)* | Bot API — free, unlimited | None worth hitting | Nothing |
+| **Weather data** | **Open-Meteo** | Free, **no API key, no signup** | Rate limits well above our needs |
+| **Maps** | **Leaflet + OpenStreetMap** tiles | Free, no key | Heavy tile usage — fine for one district |
+| **Officer dashboard hosting** | **Cloudflare Pages** or **Vercel** free tier | Generous for static + light API | Nothing at demo scale |
+| **ML training** | **Your laptop.** LightGBM on tabular data trains in seconds. | — | Nothing. No GPU needed — this is not deep learning. |
+| ↳ *if you want cloud* | Google Colab free tier | Session time limits | Irrelevant for tabular models |
+| **App distribution** | **GitHub Releases** APK + QR code, or Firebase App Distribution | Free | Play Store costs **$25 one-time — skip it for SIH** |
+| **CI/CD** | **GitHub Actions** | Free for public repos | Make the repo public — judges like that anyway |
+| **Domain** | Free `*.vercel.app` / `*.pages.dev` subdomain | Free | Vanity only |
+| **Keep-alive pings** | GitHub Actions scheduled workflow, or UptimeRobot free | Free | See demo trap |
+
+**Total recurring cost: ₹0.**
+
+### Two architecture changes ₹0 actually forces
+
+**① Cut Redis for Phase 1.** It was a scale optimisation for thousands of concurrent gate scans. At pilot scale — one district, 50 centres — **Postgres handles live queue state fine.** Delete the dependency, delete the free-tier account, delete the failure mode.
+
+> `ponytail:` queue state in Postgres, move to Redis when a single centre exceeds ~200 scans/hour or ETA recompute latency exceeds 2s.
+
+Re-read §6: the architecture diagram survives this unchanged. Redis was always an implementation detail behind the Queue Engine, which is exactly why it's safe to drop.
+
+**② SMS becomes a port, not a purchase.** The free channels — push, WhatsApp, email — carry the pilot. SMS keeps its place in the ladder as an interface with a mocked sender, so the state drops in its DLT gateway later with one adapter class. Detailed below.
+
+> `ponytail:` SMS sender mocked; implement the real adapter when a DLT-registered gateway (or a spare phone + SIM) becomes available.
+
+### The messaging problem — and the ₹0 answer
+
+Messaging is the **only** genuinely expensive piece. Commercial Indian SMS needs **DLT registration**, which needs a registered business entity — a wall for a student team. And a phone-gateway workaround needs a spare phone and SIM you may not have.
+
+**So the pilot runs on three free channels, and treats SMS as a port rather than a purchase.**
+
+```mermaid
+flowchart LR
+    N["Notification<br/>Orchestrator"] --> PORT["NotificationChannel<br/>one interface"]
+    PORT --> C1["📲 FCM push<br/>free"]
+    PORT --> C2["💬 WhatsApp Cloud API<br/>free tier"]
+    PORT --> C3["📧 Email<br/>free"]
+    PORT -.->|"same port,<br/>one adapter class"| C4["📩 SMS via state DLT gateway<br/>mocked in pilot"]
+
+    style C1 fill:#e8f5e9,stroke:#2e7d32
+    style C2 fill:#e8f5e9,stroke:#2e7d32
+    style C3 fill:#e8f5e9,stroke:#2e7d32
+    style C4 fill:#eceff1,stroke:#607d8b,stroke-dasharray: 5 5
+```
+
+**Email — free options**
+
+| Option | Free allowance *(verify current terms)* | Notes |
+|---|---|---|
+| **Brevo** *(ex-Sendinblue)* | ~300 emails/day | No card required. Good default. |
+| **Resend** | ~3,000/month | Cleanest API, great developer experience |
+| **Gmail SMTP** | ~500/day from a normal account | Zero setup; use a dedicated project account, **never a personal one** |
+| **Mailgun / SendGrid** | Trial tiers | Verify current free terms before relying on them |
+
+Email is not a compromise everywhere — **for the officer dashboard and SLA-breach escalations in §12, email is the *correct* channel.** District officers all have email; they don't want app notifications. Place it there deliberately and it stops looking like a workaround.
+
+**WhatsApp — the one that actually reaches farmers**
+
+WhatsApp has far deeper rural India penetration than email. **WhatsApp Cloud API** has a free service-conversation tier *(Meta has changed this pricing repeatedly — verify before you depend on it)*. Setup needs a Meta Business account and number verification, but **no spend**. If you get one channel working beyond push, make it this one.
+
+**Telegram — the demo-proof backup**
+
+Free, unlimited, no business account, working bot in ~20 minutes. Not realistic for farmers, but an excellent officer-alert channel and a guaranteed live fallback if WhatsApp verification stalls the week before your demo. Cheap insurance.
+
+**If you *do* find a spare Android phone + SIM later**, an open-source SMS-gateway app turns it into a real SMS sender on your existing plan (~100–200/day carrier limit). Worth doing purely for the demo moment — a judge holding a ₹1,000 feature phone watching the ETA arrive is worth more than any slide. **Optional, not required.**
+
+**The pitch line:** *"Pilot runs entirely on free channels. The no-data SMS tier is built as an interface and mocked — production plugs in the state's existing DLT gateway with one adapter class."*
+
+### ⚠️ The demo trap: cold starts
+
+Free hosting tiers sleep after idle. **A 50-second cold start in front of judges will kill your demo.**
+
+```mermaid
+flowchart TD
+    A["Free tier idles<br/>15 min"] --> B["Container sleeps 😴"]
+    B --> C["Judge taps 'Book slot'"]
+    C --> D["⏳ 50 second cold start"]
+    D --> E["❌ Demo dead"]
+
+    F["✅ FIX: keep-alive ping<br/>every 10 min"] --> G["GitHub Actions cron<br/>or UptimeRobot free"]
+    G --> H["Container never sleeps"]
+    H --> I["✅ Instant response"]
+
+    style E fill:#fde2e2,stroke:#c0392b
+    style I fill:#e8f5e9,stroke:#2e7d32
+```
+
+Two belts, both free:
+1. **Keep-alive cron** hitting `/health` every 10 minutes.
+2. **Warm it manually 15 minutes before you present.** Do this even with the cron. Assume the cron failed.
+
+**Better still: use Oracle Always Free.** It's a real always-on VM — it never sleeps, so this entire class of problem disappears.
+
+### 🎓 Highest-leverage free move: GitHub Student Developer Pack
+
+You're students competing in SIH. **Apply on day one** — approval can take days.
+
+| Included *(verify current offers)* | Worth |
+|---|---|
+| DigitalOcean credit | Removes every hosting constraint above |
+| Microsoft Azure credit | Alternative hosting + managed Postgres |
+| Namecheap domain, 1 year free | A real domain for the pitch |
+| GitHub Copilot | Faster build |
+| Various DB / monitoring credits | Removes free-tier caps |
+
+Even one hosting credit turns *"we squeezed into a free tier"* into *"we ran a proper deployment."*
+
+### What you genuinely cannot get for free
+
+Be upfront about these rather than pretending:
+
+| Item | Cost | Verdict |
+|---|---|---|
+| **IVR / outbound voice calls** | No usable free tier | **Defer to Phase 3.** Already scheduled there. Demo the concept on a slide; don't fake it. |
+| **Production SMS at state scale** | DLT + per-message cost | **Not your problem.** The state already owns this infrastructure. Say so. |
+| **Play Store listing** | $25 one-time | **Skip.** APK via GitHub Releases + QR code is fine for judges. |
+| **Aadhaar / eKYC integration** | Requires authorised entity | **Mock it.** Nobody expects a student team to have KYC access. |
+
+The pattern: everything you can't afford is something the *government partner already has*. That's not a gap in your project — it's the handover story. Put it on a slide.
+
+### Cost summary
+
+| Phase | Monthly cost |
+|---|---|
+| **Phase 1 — SIH demo & pilot** | **₹0** |
+| **Phase 2 — one district, real farmers** | **₹0** *(free channels hold; SMS only if the state supplies the gateway)* |
+| **Phase 3 — state rollout** | Runs on the state's existing NIC/MeghRaj + DLT infrastructure — **not new spend** |
+
+---
+
+## 16. Scaling
 
 ### The defining characteristic: this workload is *violently* seasonal
 
@@ -638,7 +815,7 @@ flowchart LR
 
 ---
 
-## 16. Implementation roadmap
+## 17. Implementation roadmap
 
 **The SIH trap is building seven features half-way.** Three working end-to-end beats seven on slides.
 
@@ -650,7 +827,7 @@ flowchart TB
         F2["Virtual Queue + Live ETA"]
         F3["Offline app + delta sync"]
         F4["On-device advisor"]
-        F5["Push → SMS ladder"]
+        F5["Notification ladder<br/>push → WhatsApp → email"]
     end
     subgraph PH2["📈 PHASE 2 — COMPLETES THE PS"]
         direction TB
@@ -675,7 +852,7 @@ flowchart TB
 
 1. Officer logs bag shortage → capacity drops 62 → 47, **with the reason published**
 2. Ramesh opens the app **in aeroplane mode** → still gets ranked slots → *"today 68% rejection risk, wait 2 days"*
-3. Books Thursday. Centre slips 90 min → **push fires, then SMS on a second phone with data off**
+3. Books Thursday. Centre slips 90 min → **push fires; kill the app and the WhatsApp/email fallback lands on a second device** *(add real SMS here if you get a spare phone + SIM)*
 4. Ramesh replans **from home**
 5. Geofence activates the token on approach → gate scans **offline**
 6. Payment tracker starts; force an SLA breach → officer dashboard lights up
@@ -684,7 +861,7 @@ Steps 2 and 3 are the ones judges will remember. Rehearse those until they canno
 
 ---
 
-## 17. How we prove it works
+## 18. How we prove it works
 
 Ship instrumentation from day one. A number beats an adjective.
 
@@ -701,20 +878,20 @@ Ship instrumentation from day one. A number beats an adjective.
 
 ---
 
-## 18. Risks we're not hiding from
+## 19. Risks we're not hiding from
 
 | Risk | Reality | Mitigation |
 |---|---|---|
 | **ETA that lies** | One bad prediction and farmers revert to 5 AM forever | Conservative estimates; always show a range; visible freshness stamps; publish accuracy openly |
 | **Arhtiya resistance** | Commission agents profit from opacity and are politically influential | Position them as *users* — give them a bulk-booking role rather than routing around them |
 | **Centre staff won't log inputs** | The capacity engine is worthless without daily bag/labour data | Make it 30 seconds on a phone; auto-fill from yesterday; the officer dashboard makes non-logging *visible* |
-| **Low smartphone penetration** | A large share of the user base has feature phones | SMS + IVR are **first-class**, not fallback. The app is the *secondary* channel. |
+| **Low smartphone penetration** | A large share of the user base has feature phones | SMS + IVR stay **first-class in the design** — built as ports, mocked in the pilot, filled by the state. Never claim the free-channel pilot reaches every farmer. |
 | **State portal integration** | Every state's API differs, and some have none | Adapter pattern per state; degrade to CSV import; never block on integration |
 | **Seasonal team amnesia** | 8 months between seasons; nobody remembers how it runs | Boring stack, thorough runbooks, no clever code |
 
 ---
 
-## 19. Open decisions
+## 20. Open decisions
 
 Before writing code, settle these:
 
@@ -724,9 +901,18 @@ Before writing code, settle these:
 - [ ] **Real baselines** — current average wait, trips per sale, payment lag. Ask an FPO or a district office.
 - [ ] **Does the target state's portal have an API?** Determines Phase 3 effort entirely.
 
+**Do these on day one — they have lead times:**
+
+- [ ] **Apply for the GitHub Student Developer Pack.** Approval takes days. Highest-leverage free move available to you. See §15.
+- [ ] **Try to claim an Oracle Cloud Always Free ARM instance.** Capacity is often unavailable — start retrying early so you aren't stuck on a sleeping free tier.
+- [ ] **Start WhatsApp Cloud API verification.** Meta Business setup + number verification takes days, and it's the one free channel that genuinely reaches farmers.
+- [ ] **Set up a Telegram bot as the guaranteed fallback** — 20 minutes, zero approval, insurance against WhatsApp verification stalling.
+- [ ] **Create a dedicated project email account** for Brevo/Resend/SMTP — never wire a personal account into the backend.
+- [ ] **Make the repo public** — unlocks free GitHub Actions, and judges like seeing the work.
+
 ---
 
-## 20. Summary
+## 21. Summary
 
 **VAARI is not a booking app.**
 

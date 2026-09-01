@@ -1,0 +1,26 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f6f7f5; color: #1a1a1a; }
+header { background: #2e7d32; color: white; padding: 14px 16px; text-align: center; position: sticky; top: 0; }
+header h1 { font-size: 18px; margin: 0; }
+header .tag { font-size: 12px; opacity: 0.85; }
+main { padding: 14px; max-width: 480px; margin: 0 auto; padding-bottom: 70px; }
+.card { background: white; border: 1px solid #e0e0e0; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+label { display: block; font-size: 13px; margin-top: 8px; color: #444; }
+input, select { width: 100%; padding: 9px 10px; margin-top: 3px; border: 1px solid #ccc; border-radius: 6px; font-size: 15px; }
+button { background: #2e7d32; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 10px; width: 100%; }
+button.secondary { background: #eceff1; color: #333; }
+button.slot { background: #f6f7f5; color: #1a1a1a; border: 1px solid #ddd; text-align: left; display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+button.slot.best { border-color: #2e7d32; background: #e8f5e9; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge.low { background: #e8f5e9; color: #2e7d32; }
+.badge.med { background: #fff3e0; color: #ef6c00; }
+.badge.high { background: #fde2e2; color: #c0392b; }
+.stale { font-size: 11px; color: #ef6c00; background: #fff9c4; padding: 3px 8px; border-radius: 6px; display: inline-block; margin-bottom: 8px; }
+.fresh { font-size: 11px; color: #2e7d32; }
+.muted { color: #777; font-size: 12px; }
+nav.tabs { position: fixed; bottom: 0; left: 0; right: 0; background: white; border-top: 1px solid #ddd; display: flex; }
+nav.tabs a { flex: 1; text-align: center; padding: 10px 0; font-size: 12px; color: #555; text-decoration: none; }
+nav.tabs a.active { color: #2e7d32; font-weight: 700; }
+.token { font-family: monospace; font-size: 18px; background: #f6f7f5; padding: 8px; border-radius: 6px; text-align: center; letter-spacing: 1px; }
+.offline-banner { background: #eceff1; color: #444; font-size: 12px; text-align: center; padding: 6px; }
